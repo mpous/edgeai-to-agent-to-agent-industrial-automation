@@ -1,0 +1,15 @@
+name: Industrial Automation with UNS and Agents
+description: "Edge vibration anomaly detection + A2A maintenance/planning agents over a Unified Namespace, with a 4-panel operations dashboard."
+icon: "🏭"
+ports: [5001]
+
+# Bricks activate on the VENTUNO Q under App Lab and start their backing
+# services. On a laptop (no App Lab) these declarations are simply ignored.
+#   - mqtt_broker (custom, in bricks/): on-board Mosquitto hosting the UNS.
+#       The App reaches it at hostname 'mqtt_broker' -> set MQTT_HOST=mqtt_broker.
+#   - llm: local Gemma/Qwen (download/select the model in App Lab; LLM_BACKEND=brick)
+#   - vibration_anomaly_detection: serves the deployed EI vibration model (MODEL_BACKEND=brick)
+bricks:
+  - mqtt_broker: {}
+  - arduino:llm: {}
+  - arduino:vibration_anomaly_detection: {}

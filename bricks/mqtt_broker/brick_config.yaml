@@ -1,0 +1,9 @@
+id: mqtt_broker
+name: MQTT Broker (Mosquitto)
+description: "On-board Eclipse Mosquitto MQTT broker that hosts the Unified Namespace for this App. Runs as a container on the App Lab virtual network; the App reaches it at hostname 'mqtt_broker'."
+category: iot
+variables:
+  - name: BIND_ADDRESS
+    description: "Host interface to publish the broker's 1883 port on (0.0.0.0 = all interfaces, so mosquitto_sub on the board/LAN can watch the UNS)."
+    default_value: "0.0.0.0"
+    hidden: true

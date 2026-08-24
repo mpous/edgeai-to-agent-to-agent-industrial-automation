@@ -1,0 +1,6 @@
+paho-mqtt==1.6.1
+numpy
+flask
+requests
+# Board only (Edge Impulse .eim inference); harmless to omit on a laptop demo:
+# edge-impulse-linux==1.2.2

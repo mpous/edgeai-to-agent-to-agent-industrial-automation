@@ -1,0 +1,27 @@
+# Mosquitto broker for the App Lab virtual network.
+#
+# The App's Python runs in the main app container (NOT in this container); it
+# reaches the broker over the Docker Compose network using the service name
+# below as the hostname -> set MQTT_HOST=mqtt_broker in .env on the board.
+#
+# 1883 is also published to the board host so mosquitto_sub -h localhost on the
+# board (or a LAN client) can watch the UNS. Disable any system mosquitto first
+# to avoid a port clash: sudo systemctl disable --now mosquitto
+services:
+  mqtt_broker:
+    image: eclipse-mosquitto:latest
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    volumes:
+      - "${APP_HOME:-.}/bricks/mqtt_broker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro"
+    ports:
+      - "${BIND_ADDRESS:-0.0.0.0}:1883:1883"
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -t '$$SYS/#' -C 1 -W 3 >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 4s
+      retries: 10

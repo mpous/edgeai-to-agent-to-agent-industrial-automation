@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Industrial Automation with UNS and Agents</title>
+<style>
+  /* Dark (night) theme — default */
+  :root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --fg:#e6edf3; --muted:#8b949e;
+          --inset:#0b0f14; --btn:#21262d; --wave:#0b0f14;
+          --ok:#3fb950; --warn:#d29922; --bad:#f85149; --accent:#58a6ff; }
+  /* Light (day) theme */
+  html[data-theme="light"] { --bg:#f6f8fa; --panel:#ffffff; --border:#d0d7de; --fg:#1f2328;
+          --muted:#656d76; --inset:#f0f3f6; --btn:#eaeef2; --wave:#f0f3f6;
+          --ok:#1a7f37; --warn:#9a6700; --bad:#cf222e; --accent:#0969da; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+         background:var(--bg); color:var(--fg); }
+  header { padding:10px 16px; border-bottom:1px solid var(--border); display:flex;
+           align-items:center; gap:14px; }
+  header h1 { font-size:15px; margin:0; }
+  .logo { background:#fff; padding:6px 10px; border-radius:8px; display:inline-flex;
+          align-items:center; border:1px solid var(--border); }
+  .logo img { height:20px; display:block; }
+  #state-pill { padding:3px 10px; border-radius:12px; font-size:12px; font-weight:bold; background:var(--btn); }
+  .spacer { flex:1; }
+  /* Layout: two independent columns so the right side flows D -> B with no gap.
+     Left: vibration (A) over the tall agent history (C).
+     Right: compact KPIs (D) over the big UNS tree (B). */
+  .grid { display:flex; gap:12px; padding:12px; align-items:flex-start; }
+  .col { display:flex; flex-direction:column; gap:12px; flex:1; min-width:0; }
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px;
+           overflow:auto; }
+  .pa { min-height:300px; max-height:46vh; }
+  .pb { max-height:80vh; }         /* larger UNS box */
+  .pc { max-height:94vh; }         /* tall, scrollable agent history */
+  .pd { overflow:visible; }        /* KPI box sizes to its content — never scrolls */
+  .panel h2 { font-size:13px; margin:0 0 8px; color:var(--accent); text-transform:uppercase; letter-spacing:.5px; }
+  .muted { color:var(--muted); }
+  canvas { width:100%; height:140px; background:var(--wave); border:1px solid var(--border); border-radius:4px; }
+  .row { display:flex; gap:14px; flex-wrap:wrap; margin-top:8px; }
+  .metric { flex:1; min-width:90px; background:var(--inset); border:1px solid var(--border); border-radius:6px; padding:8px; }
+  .metric .v { font-size:20px; font-weight:bold; }
+  .metric .l { font-size:11px; color:var(--muted); }
+  /* Panel A metrics are compact so all four fit on one row without growing the panel. */
+  .pa .row { gap:8px; }
+  .pa .metric { min-width:0; padding:6px; }
+  .pa .metric .v { font-size:15px; }
+  .pa .metric .l { font-size:10px; }
+  .bar { height:10px; background:var(--inset); border:1px solid var(--border); border-radius:5px; overflow:hidden; margin-top:4px; }
+  .bar > div { height:100%; background:var(--accent); }
+  button, select, input { background:var(--btn); color:var(--fg); border:1px solid var(--border); border-radius:6px;
+           padding:6px 10px; font-family:inherit; cursor:pointer; }
+  input { cursor:text; }
+  button:hover { border-color:var(--accent); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .controls { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center; }
+  .model-info { margin-top:6px; font-size:11px; }
+  .model-info .badge { padding:1px 6px; border-radius:8px; font-weight:bold; }
+  /* "?" help markers — custom floating tooltip (native title is unreliable) */
+  .tip { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px;
+         margin-left:4px; border-radius:50%; border:1px solid var(--border); color:var(--muted);
+         font-size:10px; line-height:1; cursor:help; vertical-align:middle; user-select:none; }
+  .tip:hover { border-color:var(--accent); color:var(--accent); }
+  #tooltip { position:fixed; z-index:1000; max-width:300px; padding:8px 10px; font-size:11px;
+             line-height:1.4; background:var(--panel); color:var(--fg); border:1px solid var(--accent);
+             border-radius:6px; box-shadow:0 4px 16px rgba(0,0,0,.4); pointer-events:none;
+             opacity:0; transition:opacity .1s; }
+  #tooltip.show { opacity:1; }
+  /* UNS topic tree */
+  #tree { font-size:12px; }
+  .node { margin-left:14px; border-left:1px dotted var(--border); padding-left:8px; }
+  .node.root { margin-left:0; border-left:none; padding-left:0; }
+  details > summary { cursor:pointer; color:var(--accent); padding:2px 0; list-style:none; }
+  details > summary::before { content:"▸ "; color:var(--muted); }
+  details[open] > summary::before { content:"▾ "; }
+  .leaf { padding:2px 0; }
+  .leaf .seg { color:var(--ok); }
+  .leaf pre { margin:2px 0 6px 14px; font-size:11px; white-space:pre-wrap; word-break:break-word; color:var(--fg); }
+  .leaf.flash pre { animation:flashbg 1.4s ease-out; }
+  @keyframes flashbg { 0% { background:var(--accent); color:#0d1117; } 100% { background:transparent; } }
+  summary .dot { color:var(--warn); margin-left:6px; font-size:14px; line-height:1; vertical-align:middle; }
+  .llm-bar { font-size:11px; margin-bottom:8px; padding:6px 8px; background:var(--inset);
+             border:1px solid var(--border); border-radius:6px; }
+  .llm-bar .badge { padding:1px 6px; border-radius:8px; font-weight:bold; background:var(--accent); color:#0d1117; }
+  #agents { display:flex; flex-direction:column; gap:8px; }
+  .evt { border-left:3px solid var(--accent); padding:6px 10px; background:var(--inset); border-radius:4px; }
+  .evt .h { font-size:12px; }
+  .evt .r { font-size:12px; color:var(--fg); margin-top:4px; }
+  .evt .p { margin-top:4px; }
+  .evt .p summary { font-size:10px; color:var(--muted); cursor:pointer; user-select:none; }
+  .evt .p summary:hover { color:var(--accent); }
+  .evt .p pre { font-size:11px; color:var(--muted); background:var(--wave); border:1px solid var(--border);
+                border-radius:4px; padding:6px 8px; margin:4px 0 0; white-space:pre-wrap; word-break:break-word;
+                max-height:220px; overflow:auto; }
+  .evt .d { font-size:11px; color:var(--warn); margin-top:4px; white-space:pre-wrap; }
+  .evt .t { font-size:10px; color:var(--muted); float:right; }
+  .tag { font-size:10px; padding:1px 6px; border-radius:8px; background:var(--btn); color:var(--muted); }
+  .oee-big { font-size:34px; font-weight:bold; }
+</style>
+</head>
+<body>
+<div id="tooltip"></div>
+<header>
+  <span class="logo"><img src="/static/edge-impulse-logo.svg" alt="Edge Impulse"></span>
+  <h1>Industrial Automation with UNS and Agents</h1>
+  <span class="muted" id="base">{{ base }}</span>
+  <span id="state-pill">—</span>
+  <span class="spacer"></span>
+  <span class="muted" id="conn" title="Live connection to the dashboard's real-time event stream (Server-Sent Events). Green ● = receiving UNS updates in real time; red ● = the stream dropped and is retrying."><span style="color:var(--warn)">●</span> connecting…</span>
+  <button id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark">🌙</button>
+</header>
+
+<div class="grid">
+ <div class="col">
+  <!-- Panel A -->
+  <div class="panel pa">
+    <h2>Vibration &amp; Real-time Inference</h2>
+    <canvas id="wave" width="600" height="140"></canvas>
+    <div class="row">
+      <div class="metric"><div class="v" id="m-score">–</div>
+        <div class="l">anomaly score<span class="tip" title="How far the current vibration is from the healthy baseline. If it stays above the threshold for several consecutive windows, it is flagged as a real fault.">?</span></div>
+        <div class="bar"><div id="score-bar" style="width:0%"></div></div></div>
+      <div class="metric"><div class="v" id="m-rms">–</div>
+        <div class="l">RMS<span class="tip" title="Root Mean Square — the overall energy/amplitude of the vibration signal. Rises as the machine vibrates harder.">?</span></div></div>
+      <div class="metric"><div class="v" id="m-kurt">–</div>
+        <div class="l">kurtosis<span class="tip" title="Peakedness of the signal. High kurtosis means sharp, spiky impacts — often an early sign of bearing damage.">?</span></div></div>
+      <div class="metric"><div class="v" id="m-crest">–</div>
+        <div class="l">crest<span class="tip" title="Crest factor = peak ÷ RMS. High values indicate short, impulsive shocks rather than smooth vibration.">?</span></div></div>
+    </div>
+    <div class="muted" style="margin-top:6px" id="verdict">verdict: – · model: –</div>
+    <div class="model-info muted" id="model-info">model: –</div>
+    <div class="controls">
+      <select id="fault">
+        <option value="">random fault</option>
+        <option>imbalance</option><option>misalignment</option>
+        <option>bearing_spall</option><option>belt_slip</option><option>degradation</option>
+      </select>
+      <button onclick="force()">⚡ Trigger anomaly</button>
+    </div>
+    <div class="controls">
+      <input id="ei-key" type="password" placeholder="Edge Impulse API key" style="min-width:210px"
+             oninput="saveKey()">
+      <select id="label">
+        <option>normal</option><option>imbalance</option><option>misalignment</option>
+        <option>bearing_spall</option><option>belt_slip</option><option>degradation</option>
+      </select>
+      <button id="rec-btn" onclick="record()">⏺ Record 10s</button>
+      <button onclick="ingest()">⬆ Ingest 1 window</button>
+    </div>
+    <div class="muted" id="ingest-status" style="margin-top:6px"></div>
+  </div>
+
+  <!-- Panel C -->
+  <div class="panel pc">
+    <h2>Agents Thinking<span class="tip" title="Autonomous agents subscribe to the UNS, reason with an LLM, and coordinate over Google's Agent-to-Agent (A2A) protocol. This shows their context, reasoning and decisions over time.">?</span></h2>
+    <div class="llm-bar" id="llm-bar">LLM in use: <span class="badge" id="llm-badge">–</span> <span id="llm-model" class="muted"></span></div>
+    <div id="agents"></div>
+  </div>
+ </div>
+
+ <div class="col">
+  <!-- Panel D -->
+  <div class="panel pd">
+    <h2>Manufacturing KPIs<span class="tip" title="Key Performance Indicators: quantified measures of how well the line is producing — effectiveness, output rate and cost.">?</span></h2>
+    <div class="row">
+      <div class="metric"><div class="oee-big" id="k-oee">–</div>
+        <div class="l">OEE<span class="tip" title="Overall Equipment Effectiveness = Availability × Performance × Quality. The single headline number for how productive the equipment is.">?</span></div></div>
+      <div class="metric">
+        <div class="l">Availability<span class="tip" title="Share of planned time the machine was actually running (not stopped by anomaly or maintenance).">?</span></div><div class="v" id="k-avail">–</div>
+        <div class="l">Performance<span class="tip" title="Actual production speed compared with the ideal/target rate.">?</span></div><div class="v" id="k-perf">–</div>
+        <div class="l">Quality<span class="tip" title="Share of good units out of the total produced.">?</span></div><div class="v" id="k-qual">–</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="metric"><div class="v" id="k-rate">–</div>
+        <div class="l">units/min (rate)<span class="tip" title="Current production rate in units produced per minute.">?</span></div></div>
+      <div class="metric"><div class="v" id="k-units">–</div>
+        <div class="l">units total<span class="tip" title="Cumulative units produced since start.">?</span></div></div>
+    </div>
+    <div class="row">
+      <div class="metric"><div class="v" id="k-up">–</div>
+        <div class="l">operational time (s)<span class="tip" title="Seconds the machine has spent running and producing.">?</span></div></div>
+      <div class="metric"><div class="v" id="k-down">–</div>
+        <div class="l">downtime (s)<span class="tip" title="Seconds the machine has been stopped due to an anomaly or maintenance.">?</span></div></div>
+    </div>
+    <div class="row">
+      <div class="metric"><div class="v" id="k-cost">–</div>
+        <div class="l">total cost<span class="tip" title="Running cost + downtime cost + maintenance cost accumulated so far.">?</span></div></div>
+    </div>
+  </div>
+
+  <!-- Panel B -->
+  <div class="panel pb">
+    <h2>Unified Namespace<span class="tip" title="Unified Namespace (UNS): a single MQTT hierarchy that is the real-time single source of truth for the whole enterprise. Topics follow ISA-95: enterprise / site / area / line / cell.">?</span> · ISA-95 topic tree</h2>
+    <div class="muted" style="font-size:11px;margin-bottom:6px">Live view of the whole enterprise (<span id="ent">{{ enterprise }}</span>/#). Each datum sits at the level that owns it.</div>
+    <div id="tree"></div>
+  </div>
+ </div>
+</div>
+
+<script>
+const BASE = "{{ base }}";
+const T = {{ topics|tojson }};       // named UNS topic paths (levels vary)
+const LLM = {{ llm|tojson }};        // which LLM backend/model the agents use
+const store = {};                    // topic -> payload
+const agentEvents = [];              // chronological agent trace history
+
+// --- theme ---
+function applyTheme(t){
+  document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('theme-toggle').textContent = t==='light' ? '☀️' : '🌙';
+}
+function toggleTheme(){
+  const next = document.documentElement.getAttribute('data-theme')==='light' ? 'dark' : 'light';
+  localStorage.setItem('theme', next); applyTheme(next);
+}
+applyTheme(localStorage.getItem('theme') || 'dark');
+
+// --- LLM in use ---
+document.getElementById('llm-badge').textContent = LLM.label || LLM.backend;
+document.getElementById('llm-model').textContent = LLM.model ? `· model: ${LLM.model}` : '';
+
+// --- Edge Impulse key (browser-held) ---
+const keyEl = document.getElementById('ei-key');
+keyEl.value = localStorage.getItem('ei_api_key') || '';
+function saveKey(){ localStorage.setItem('ei_api_key', keyEl.value.trim()); }
+function apiKey(){ return keyEl.value.trim(); }
+
+function force() {
+  const fault = document.getElementById('fault').value;
+  fetch('/api/force_anomaly', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({fault: fault || null})});
+}
+function setStatus(msg){ document.getElementById('ingest-status').textContent = msg; }
+
+function ingest() {
+  if(!apiKey()){ setStatus('✗ enter your Edge Impulse API key first'); return; }
+  const label = document.getElementById('label').value;
+  setStatus('ingesting 1 window…');
+  fetch('/api/ingest', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({label, api_key: apiKey()})}).then(r=>r.json()).then(d=>{
+      setStatus(d.ok ? `✓ sent '${label}' (${d.samples} samples, HTTP ${d.status})` : `✗ ${d.error||'failed'}`);
+    }).catch(e=>setStatus('✗ '+e));
+}
+
+function record() {
+  if(!apiKey()){ setStatus('✗ enter your Edge Impulse API key first'); return; }
+  const label = document.getElementById('label').value;
+  const btn = document.getElementById('rec-btn');
+  const secs = 10; btn.disabled = true;
+  let left = secs;
+  setStatus(`⏺ recording '${label}'… ${left}s`);
+  const timer = setInterval(()=>{ left--; if(left>0) setStatus(`⏺ recording '${label}'… ${left}s`); }, 1000);
+  fetch('/api/record', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({label, seconds: secs, api_key: apiKey()})}).then(r=>r.json()).then(d=>{
+      clearInterval(timer); btn.disabled = false;
+      setStatus(d.ok ? `✓ recorded '${label}' — ${d.windows} windows / ${d.samples} samples to Edge Impulse (HTTP ${d.status})`
+                     : `✗ ${d.error||'failed'}`);
+    }).catch(e=>{ clearInterval(timer); btn.disabled = false; setStatus('✗ '+e); });
+}
+
+function fmt(n, d=2){ return (n===undefined||n===null)?'–':Number(n).toFixed(d); }
+
+function drawWave(axis){
+  const c = document.getElementById('wave'), ctx = c.getContext('2d');
+  const W=c.width, H=c.height; ctx.clearRect(0,0,W,H);
+  const colors={x:'#58a6ff',y:'#3fb950',z:'#d29922'};
+  for(const ax of ['x','y','z']){
+    const s = axis[ax]||[]; if(!s.length) continue;
+    ctx.strokeStyle=colors[ax]; ctx.lineWidth=1; ctx.beginPath();
+    for(let i=0;i<s.length;i++){
+      const x=(i/(s.length-1))*W, y=H/2 - s[i]*(H/6);
+      i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+    }
+    ctx.stroke();
+  }
+}
+
+function shortTopic(t){ return t.startsWith(BASE) ? t.slice(BASE.length+1) : t; }
+
+// --- UNS topic tree (nested by '/') ---
+const collapsed = new Set();   // node paths the user has explicitly collapsed
+const unseen = new Set();      // collapsed branch paths with new, not-yet-viewed data
+const pendingFlash = new Set();// topics whose payload just changed (momentary flash)
+
+function buildTree(topics){
+  const root = {children:{}};
+  topics.forEach(t=>{
+    const parts = t.split('/');
+    let node = root;
+    parts.forEach((p,i)=>{
+      node.children[p] = node.children[p] || {children:{}};
+      node = node.children[p];
+      if(i===parts.length-1) node.topic = t;
+    });
+  });
+  return root;
+}
+function renderNode(name, node, path){
+  const keys = Object.keys(node.children).sort();
+  if(node.topic && keys.length===0){
+    const d = document.createElement('div');
+    d.className = pendingFlash.has(node.topic) ? 'leaf flash' : 'leaf';
+    d.innerHTML = `<span class="seg">${name}</span>`;
+    const pre = document.createElement('pre');
+    pre.textContent = JSON.stringify(store[node.topic]);
+    d.appendChild(pre);
+    return d;
+  }
+  const det = document.createElement('details');
+  det.open = !collapsed.has(path);               // preserve the user's collapse choice
+  const sum = document.createElement('summary');
+  sum.textContent = name;
+  if(collapsed.has(path) && unseen.has(path)){    // new data arrived while collapsed
+    const dot = document.createElement('span'); dot.className='dot'; dot.textContent='●';
+    dot.title='new data published here'; sum.appendChild(dot);
+  }
+  det.appendChild(sum);
+  det.addEventListener('toggle', ()=>{
+    if(det.open){ collapsed.delete(path); unseen.delete(path); }
+    else { collapsed.add(path); }
+  });
+  keys.forEach(k=>{
+    const childPath = path ? path+'/'+k : k;
+    const child = renderNode(k, node.children[k], childPath);
+    child.classList.add('node');
+    det.appendChild(child);
+  });
+  return det;
+}
+function renderTree(){
+  const el = document.getElementById('tree'); el.innerHTML='';
+  const tree = buildTree(Object.keys(store));
+  const topKeys = Object.keys(tree.children).sort();
+  topKeys.forEach(k=>{
+    const node = renderNode(k, tree.children[k], k);
+    node.classList.add('node','root');
+    el.appendChild(node);
+  });
+  pendingFlash.clear();  // flash is momentary; consumed on this render
+}
+// Mark a changed topic: flash its leaf, and dot any collapsed ancestor branch.
+function markChanged(topic){
+  pendingFlash.add(topic);
+  const parts = topic.split('/');
+  for(let i=1; i<parts.length; i++){
+    const ancestor = parts.slice(0,i).join('/');
+    if(collapsed.has(ancestor)) unseen.add(ancestor);
+  }
+}
+
+// --- Panel C: chronological, scrollable agent history (newest first) ---
+function addAgentEvent(e){
+  agentEvents.push(e);
+  if(agentEvents.length > 200) agentEvents.shift();
+}
+function renderAgents(){
+  const el=document.getElementById('agents'); el.innerHTML='';
+  for(let i=agentEvents.length-1; i>=0; i--){
+    const e=agentEvents[i];
+    const when = e.ts ? new Date(e.ts*1000).toLocaleTimeString() : '';
+    const d=document.createElement('div'); d.className='evt';
+    d.innerHTML=`<div class="h"><span class="t">${when}</span><b>${e.agent}</b> <span class="tag">${e.event}</span>
+        <span class="tag">memory: ${(e.memory||[]).length}</span></div>
+      <div class="r">${e.reasoning||''}</div>
+      <div class="d">${e.decision&&Object.keys(e.decision).length?JSON.stringify(e.decision):''}</div>`;
+    if(e.prompt){
+      const det=document.createElement('details'); det.className='p';
+      const sum=document.createElement('summary'); sum.textContent='prompt sent to LLM';
+      const pre=document.createElement('pre'); pre.textContent=e.prompt;
+      det.appendChild(sum); det.appendChild(pre); d.appendChild(det);
+    }
+    el.appendChild(d);
+  }
+}
+
+function updateModelInfo(){
+  const m = store[T.model]; const el=document.getElementById('model-info');
+  if(!m){ el.textContent='model: –'; return; }
+  const live = m.backend==='brick' || m.backend==='eim';
+  const badge = `<span class="badge" style="background:${live?'var(--ok)':'var(--warn)'};color:#0d1117">`
+              + `${live?'LIVE EI':'BASELINE'}</span>`;
+  let extra = '';
+  if(m.backend==='brick'){
+    extra = ` · ${m.frequency||'?'} Hz · ${m.input_features||'?'} features`;
+  } else if(m.backend==='statistical'){
+    extra = m.ready ? ' · warmed up' : ' · warming up…';
+  }
+  el.innerHTML = `${badge} model: <b>${m.version||m.backend}</b>${extra}`
+              + (m.note?` <span class="muted">— ${m.note}</span>`:'');
+}
+
+function updatePanelA(){
+  const feat = store[T.features];
+  const anom = store[T.anomaly];
+  if(feat){ document.getElementById('m-rms').textContent=fmt(feat.rms);
+    document.getElementById('m-kurt').textContent=fmt(feat.kurtosis);
+    document.getElementById('m-crest').textContent=fmt(feat.crest); }
+  if(anom){ document.getElementById('m-score').textContent=fmt(anom.anomaly_score);
+    document.getElementById('score-bar').style.width=Math.min(100,anom.anomaly_score*100)+'%';
+    document.getElementById('score-bar').style.background=anom.verdict?'var(--bad)':'var(--accent)';
+    document.getElementById('verdict').textContent=
+      `verdict: ${anom.verdict?'ANOMALY':'ok'} · consec ${anom.consecutive} · model ${anom.model_ver}`; }
+}
+
+function updatePanelD(){
+  const oee=store[T.kpi_oee], prod=store[T.kpi_production],
+        up=store[T.kpi_uptime], cost=store[T.kpi_cost];
+  if(oee){ document.getElementById('k-oee').textContent=(oee.oee*100).toFixed(0)+'%';
+    document.getElementById('k-avail').textContent=(oee.availability*100).toFixed(0)+'%';
+    document.getElementById('k-perf').textContent=(oee.performance*100).toFixed(0)+'%';
+    document.getElementById('k-qual').textContent=(oee.quality*100).toFixed(0)+'%'; }
+  if(prod){ document.getElementById('k-rate').textContent=fmt(prod.rate_units_min,1);
+    document.getElementById('k-units').textContent=fmt(prod.units_total,0); }
+  if(up){ document.getElementById('k-up').textContent=fmt(up.operational_time_s,0);
+    document.getElementById('k-down').textContent=fmt(up.downtime_s,0); }
+  if(cost){ const tot=(cost.running_cost+cost.downtime_cost+cost.maintenance_cost);
+    document.getElementById('k-cost').textContent=tot.toFixed(0)+' '+cost.currency; }
+}
+
+function updateStatePill(){
+  const s=store[T.state];
+  const pill=document.getElementById('state-pill'); if(!s) return;
+  pill.textContent=s.state;
+  const colors={healthy:'var(--ok)', anomaly:'var(--bad)', maintenance:'var(--warn)', repairing:'var(--accent)'};
+  pill.style.background = colors[s.state] || 'var(--warn)';
+  pill.style.color='#0d1117';
+}
+
+function refreshPanels(){
+  renderTree(); updatePanelA(); updatePanelD(); updateStatePill(); updateModelInfo();
+}
+
+// Seed agent history from the server (SSE prime only carries UNS state).
+fetch('/api/state').then(r=>r.json()).then(d=>{
+  (d.agents||[]).forEach(addAgentEvent); renderAgents();
+}).catch(()=>{});
+
+const es = new EventSource('/events');
+es.onopen = ()=>document.getElementById('conn').innerHTML='<span style="color:var(--ok)">●</span> live stream';
+es.onerror = ()=>document.getElementById('conn').innerHTML='<span style="color:var(--bad)">●</span> reconnecting…';
+es.onmessage = (ev)=>{
+  const m = JSON.parse(ev.data);
+  if(m.kind==='raw'){ drawWave(m.payload.axis||{}); return; }
+  if(m.kind==='agent'){ addAgentEvent(m.payload); renderAgents(); return; }
+  // uns
+  if(JSON.stringify(store[m.topic]) !== JSON.stringify(m.payload)) markChanged(m.topic);
+  store[m.topic]=m.payload;
+  refreshPanels();
+};
+
+// --- custom floating tooltip for ".tip" markers (native title is unreliable) ---
+(function initTooltips(){
+  const tip = document.getElementById('tooltip');
+  function text(el){ return el.getAttribute('data-tip') || el.getAttribute('title') || ''; }
+  document.querySelectorAll('.tip').forEach(el=>{
+    // Move title into data-tip so the native tooltip doesn't also fire.
+    if(el.hasAttribute('title')){ el.setAttribute('data-tip', el.getAttribute('title')); el.removeAttribute('title'); }
+    el.addEventListener('mouseenter', ()=>{ tip.textContent = text(el); tip.classList.add('show'); });
+    el.addEventListener('mousemove', (e)=>{
+      const pad=12; let x=e.clientX+pad, y=e.clientY+pad;
+      const r=tip.getBoundingClientRect();
+      if(x+r.width > innerWidth) x = e.clientX - r.width - pad;
+      if(y+r.height > innerHeight) y = e.clientY - r.height - pad;
+      tip.style.left = x+'px'; tip.style.top = y+'px';
+    });
+    el.addEventListener('mouseleave', ()=>tip.classList.remove('show'));
+  });
+})();
+</script>
+</body>
+</html>
